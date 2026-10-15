@@ -13,7 +13,7 @@
 **1. 克隆并进入项目**
 
 ```bash
-git clone <仓库地址>
+git clone https://github.com/learncode001-bot/kuafuAI_News_Agent.git
 cd kuafuAI_News_Agent
 ```
 
