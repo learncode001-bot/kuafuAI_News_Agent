@@ -179,6 +179,19 @@ def _make_fake_llm():
             )
         else:
             brief_content = f"# 每日新闻简报（{topic}）\n\n" + "\n\n".join(sections)
+            # 混合话题：有素材的板块照常出；没素材的关键词明确标注「未发现」，不悄悄吞掉
+            unmatched = []
+            for kw in _re.split(r"[,，]", topic):
+                kw = kw.strip()
+                if not kw:
+                    continue
+                hit = any(rkw in kw.lower()
+                          for route in FILE_ROUTES.values() for rkw in route["关键词"])
+                if not hit:
+                    unmatched.append(kw)
+            if unmatched:
+                notes = "\n".join(f"- 「{kw}」：在本地 news_data/ 中未找到相关内容。" for kw in unmatched)
+                brief_content += f"\n\n## 未找到素材的话题\n{notes}"
 
         return brief_content, file_sources
 
