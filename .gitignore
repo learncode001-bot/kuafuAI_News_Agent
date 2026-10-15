@@ -1,0 +1,15 @@
+# 本机私有配置（含环境变量接线），绝不能提交仓库
+config.py
+
+# 运行时产物（用户数据，不入库）
+briefs/
+subscriptions.json
+scheduler.log
+daily_brief.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/

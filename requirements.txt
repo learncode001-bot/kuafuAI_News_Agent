@@ -1,0 +1,19 @@
+# 每日 AI 新闻助手 —— 依赖清单
+# 一键安装: pip install -r requirements.txt
+
+# Web 服务（Flask 页面 + 定时推送）
+flask>=3.0
+
+# 在线模式：标准 ReAct Agent-Loop（requests 直连 OpenAI 兼容接口）
+requests>=2.31
+
+# 工具定义（@tool 装饰器，5 个工具函数）
+langchain-core>=1.0
+
+# 离线模式：FakeListLLM 模拟 LLM + AgentExecutor 演示链路
+langchain-classic>=1.0
+
+# ---- 以下为可选增强（不装也能跑，代码内已做缺失兜底）----
+# 在线兜底路径：LangGraph create_react_agent + ChatOpenAI
+# langgraph>=1.0
+# langchain-openai>=0.2
