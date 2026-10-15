@@ -135,6 +135,11 @@ def _run_and_archive(username: str, topic: str):
 
         final_text = run(agent_pair, topic=topic)
 
+        # 在线调用失败（friendly 兜底文本）：按失败处理——不归档、不假装成功，
+        # 抛给调用方：页面显示错误提示、调度器记 ❌ 日志
+        if final_text.startswith("抱歉，在线 LLM 调用出错"):
+            raise RuntimeError(final_text)
+
         brief_text = ""
         if brief_path.exists():
             try:
@@ -445,8 +450,11 @@ def scheduler_status():
 # 启动
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # 启动定时推送后台线程
-    threading.Thread(target=_scheduler_loop, daemon=True).start()
-    print("\n🌐 Flask 启动中... 浏览器打开 http://localhost:5000")
-    print("⏰ 定时推送线程已就绪（每 5 秒检查一次）\n")
+    # debug 重载机制会同时存在父(文件监控)/子(真正服务)两个进程；
+    # 只在子进程里启动调度线程，否则同一订阅到点会被推两次
+    # （WERKZEUG_RUN_MAIN=true 只存在于子进程；若以后关闭 reloader 需去掉此判断）
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Thread(target=_scheduler_loop, daemon=True).start()
+        print("⏰ 定时推送线程已就绪（每 5 秒检查一次）")
+    print("\n🌐 Flask 启动中... 浏览器打开 http://localhost:5000\n")
     app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=True)
