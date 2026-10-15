@@ -38,6 +38,7 @@ AGENT_LOCK = threading.Lock()
 # 定时推送状态
 SCHED_LAST_RUN = {}   # {username+topics: "2026-10-14"}  —— 当天已跑过的 key
 SCHED_LOCK = threading.Lock()
+SCHED_RETRY = {}      # {key: ("YYYY-MM-DD", "HH:MM")} —— 推送失败后 5 分钟的补推时刻（仅补一次）
 
 
 # ---------------------------------------------------------------------------
@@ -171,25 +172,40 @@ def _scheduler_loop():
                 if not sub.get("enabled", True):
                     continue
                 push_time = sub.get("time", "09:00")
-                if current_hhmm != push_time:
-                    continue
 
                 # 去重 key 含时间+创建时间：同一条订阅一天只推一次；
                 # 删除后重新保存（created_at 变化）或改时间都算新订阅，不会被旧标记挡住
                 key = f"{sub['username']}|{sub['topics']}|{push_time}|{sub.get('created_at', '')}"
-                with SCHED_LOCK:
-                    if SCHED_LAST_RUN.get(key) == today:
-                        continue
-                    SCHED_LAST_RUN[key] = today
 
-                log_line = f"⏰ [{now.strftime('%Y-%m-%d %H:%M:%S')}] 自动推送: {sub['username']} @ {push_time} → {sub['topics']}"
+                # 触发判定：正常到点 OR 失败后登记的 5 分钟补推到点
+                retry = SCHED_RETRY.get(key)
+                is_retry = bool(retry and retry[0] == today and retry[1] == current_hhmm)
+                if is_retry:
+                    with SCHED_LOCK:
+                        SCHED_RETRY.pop(key, None)  # 只补推一次，弹出避免同一分钟重复触发
+                else:
+                    if current_hhmm != push_time:
+                        continue
+                    with SCHED_LOCK:
+                        if SCHED_LAST_RUN.get(key) == today:
+                            continue
+                        SCHED_LAST_RUN[key] = today
+
+                tag = "补推" if is_retry else "自动推送"
+                log_line = f"⏰ [{now.strftime('%Y-%m-%d %H:%M:%S')}] {tag}: {sub['username']} @ {push_time} → {sub['topics']}"
                 print(log_line)
                 try:
                     final, brief, archive, mode = _run_and_archive(sub["username"], sub["topics"])
                     log_line += f"  ✅ 完成，归档 {archive}  (mode={mode})"
                     print(log_line)
                 except Exception as e:
-                    log_line += f"  ❌ 失败: {e}"
+                    if is_retry:
+                        log_line += f"  ❌ 补推仍失败，今天不再自动推送（可点「立即推」手动补）: {e}"
+                    else:
+                        retry_dt = now + timedelta(minutes=5)
+                        with SCHED_LOCK:
+                            SCHED_RETRY[key] = (today, retry_dt.strftime("%H:%M"))
+                        log_line += f"  ❌ 失败: {e}（将于 {retry_dt.strftime('%H:%M')} 自动补推一次）"
                     print(log_line)
                     import traceback
                     traceback.print_exc()

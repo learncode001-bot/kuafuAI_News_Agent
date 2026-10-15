@@ -399,30 +399,49 @@ def _build_online_react_runner():
             tip = "网络连不上该 API 域名"
         elif "429" in msg:
             tip = "触发限流，稍后再试或换模型"
+        elif "503" in msg or "too busy" in msg.lower() or "service_unavailable" in msg.lower():
+            tip = "大模型服务方繁忙（503），属临时故障，稍后重试即可，配置没有问题"
         else:
             tip = "配置或网络异常"
         return (
             "抱歉，在线 LLM 调用出错了（程序已安全兜底，未崩溃）。\n"
-            f"错误类型：{name}\n可能原因：{tip}\n\n"
+            f"错误类型：{name}\n可能原因：{tip}\n"
+            f"错误详情：{msg[:200]}\n\n"
             "请检查 config.py：1) API_KEY 是否有效 2) API_URL 是否为该平台的 OpenAI 兼容地址 "
             "3) MODEL 名是否正确；或先把 USE_LLM_API 改为 False 使用离线模拟模式。"
         )
 
     def _chat(messages):
-        """调一次 chat/completions，返回 message dict。"""
-        resp = requests.post(
-            chat_url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages, "tools": oai_tools},
-            timeout=120,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"API 返回 {resp.status_code}: {resp.text[:300]}")
-        data = resp.json()
-        try:
-            return data["choices"][0]["message"]
-        except (KeyError, IndexError):
-            raise RuntimeError(f"模型返回格式异常: {_json.dumps(data, ensure_ascii=False)[:300]}")
+        """调一次 chat/completions，返回 message dict。
+        429/5xx 临时性错误自动退避重试（DeepSeek 高峰期常见 503 Service is too busy）。"""
+        import time as _time
+        last_err = None
+        for attempt in range(3):  # 最多 3 次：立即 → 等 3s → 等 6s
+            try:
+                resp = requests.post(
+                    chat_url,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": messages, "tools": oai_tools},
+                    timeout=120,
+                )
+            except requests.RequestException as e:
+                last_err = e
+                if attempt < 2:
+                    print(f"[RETRY] 网络异常({e})，{3 * (attempt + 1)}s 后第 {attempt + 2} 次重试…")
+                    _time.sleep(3 * (attempt + 1))
+                continue
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                print(f"[RETRY] API 返回 {resp.status_code}（繁忙/限流），{3 * (attempt + 1)}s 后第 {attempt + 2} 次重试…")
+                _time.sleep(3 * (attempt + 1))
+                continue
+            if resp.status_code != 200:
+                raise RuntimeError(f"API 返回 {resp.status_code}: {resp.text[:300]}")
+            data = resp.json()
+            try:
+                return data["choices"][0]["message"]
+            except (KeyError, IndexError):
+                raise RuntimeError(f"模型返回格式异常: {_json.dumps(data, ensure_ascii=False)[:300]}")
+        raise last_err
 
     def invoke(user_input: str) -> str:
         messages = [
