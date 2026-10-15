@@ -54,7 +54,7 @@ export NEWS_AGENT_API_KEY=sk-你的key
 python app.py
 ```
 
-浏览器打开 **http://localhost:5000**，看到页面顶部徽标显示【在线LLM-API模式】或【离线模拟模式】即成功。
+浏览器打开 `http://localhost:5000`，看到页面顶部徽标显示【在线LLM-API模式】或【离线模拟模式】即成功。
 
 **6. 体验完整流程**
 
