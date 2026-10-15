@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>每日 AI 新闻助手</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0; background: #f6f6f6; color: #222; font-family: "Segoe UI", -apple-system, "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
+
+  /* 报头（新闻网站风格：白底 + 红色分隔线） */
+  header.site { background: #fff; border-bottom: 2px solid #b00; }
+  .header-inner { max-width: 1180px; margin: 0 auto; padding: 14px 16px; display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+  h1 { font-size: 22px; margin: 0; }
+  .status { font-size: 12px; color: #666; }
+  .badge { display: inline-block; background: #eee; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 6px; vertical-align: middle; font-weight: normal; }
+  .badge-offline { background: #fff3cd; color: #856404; }
+  .badge-online { background: #d4edda; color: #155724; }
+
+  /* 两大块：左主阅读区 + 右功能面板 */
+  .layout { display: flex; gap: 18px; margin-top: 18px; align-items: flex-start; }
+  .main { flex: 1; min-width: 0; }
+  .side { width: 330px; flex-shrink: 0; }
+  @media (max-width: 920px) { .layout { flex-direction: column-reverse; } .side { width: 100%; } }
+
+  .card { background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 10px; font-size: 14px; color: #444; }
+  label { display: block; margin: 0 0 4px; font-weight: bold; font-size: 12px; color: #555; }
+  input[type=text], input[type=time] { width: 100%; padding: 7px 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+  .row2 { display: flex; gap: 8px; margin-top: 8px; }
+  button { padding: 7px 14px; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  .btn-primary { background: #0066cc; color: #fff; }
+  .btn-secondary { background: #eee; color: #555; padding: 4px 10px; font-size: 12px; }
+  .btn-danger { background: #d9534f; color: #fff; padding: 3px 9px; font-size: 12px; }
+  .btn-success { background: #28a745; color: #fff; }
+
+  .loading { display: none; color: #666; margin-top: 8px; font-size: 12px; }
+  .loading.active { display: block; }
+  .hint { font-size: 11px; color: #aaa; margin-top: 6px; line-height: 1.6; }
+  .error { color: #d9534f; background: #f2dede; padding: 10px; border-radius: 4px; font-size: 13px; }
+
+  /* 列表（订阅 / 历史） */
+  .list-card { border: 1px solid #e3e3e3; border-radius: 4px; background: #fff; }
+  .list-item { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; gap: 8px; }
+  .list-item:last-child { border-bottom: none; }
+  .list-item.clickable { cursor: pointer; }
+  .list-item.clickable:hover { background: #f8f4f4; }
+  .list-empty { padding: 14px; text-align: center; color: #bbb; font-size: 12px; }
+  .list-meta { font-size: 11px; color: #999; }
+  .push-now-btn { background: #28a745; color: #fff; padding: 3px 9px; font-size: 11px; margin-right: 4px; }
+
+  /* ---------- 主阅读区：新闻排版 ---------- */
+  .main-card { background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; padding: 26px 32px; min-height: 560px; }
+  .main-meta { font-size: 12px; color: #999; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 16px; min-height: 18px; }
+  .news-title { font-size: 24px; margin: 4px 0 12px; line-height: 1.35; }
+  .news-sec { margin-top: 24px; }
+  .news-sec-title { font-size: 17px; font-weight: bold; border-left: 4px solid #b00; padding-left: 9px; line-height: 1.3; }
+  .news-date { font-size: 12px; color: #999; font-weight: normal; margin-left: 8px; }
+  .news-item { margin: 14px 0 0; }
+  .news-item-head { font-weight: bold; font-size: 14.5px; line-height: 1.5; }
+  .news-item p { margin: 4px 0 0; font-size: 13.5px; line-height: 1.8; color: #444; }
+  .news-standalone { font-size: 13.5px; line-height: 1.8; color: #444; }
+  .news-empty { text-align: center; color: #bbb; padding: 140px 0; font-size: 14px; line-height: 2; }
+
+  /* 顶部小提示弹窗（替代全屏绿色大条） */
+  #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid #c9e7d4; border-left: 4px solid #28a745; border-radius: 4px; padding: 9px 16px; font-size: 13px; color: #1c7c3c; box-shadow: 0 2px 10px rgba(0,0,0,.12); display: none; z-index: 999; cursor: pointer; max-width: 80vw; }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="header-inner">
+    <h1>📰 我的每日新闻<span id="modeLabel" class="badge">检测中...</span></h1>
+    <div class="status" id="statusLine">正在连接服务...</div>
+  </div>
+</header>
+
+<!-- 顶部小提示弹窗：收到定时推送时出现，点击跳到正文 -->
+<div id="toast" onclick="toastClick()">📥 <span id="toastMsg"></span>（点击查看）</div>
+
+<div class="wrap">
+<div class="layout">
+
+  <!-- ==================== 主阅读区 ==================== -->
+  <main class="main">
+    <div class="main-card" id="mainCard">
+      <div class="main-meta" id="mainMeta"></div>
+      <div id="mainBox">
+        <div class="news-empty">还没有内容<br>在右侧「立即生成」一份，或等待订阅到点自动推送</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ==================== 功能侧边面板 ==================== -->
+  <aside class="side">
+
+    <!-- 用户名 -->
+    <div class="card">
+      <label>👤 用户名</label>
+      <input type="text" id="username" placeholder="请输入你的用户名" required>
+      <div class="hint">用户名就是你的身份：订阅、推送、历史简报都跟它走</div>
+    </div>
+
+    <!-- 立即生成 -->
+    <div class="card">
+      <h3>🚀 立即生成</h3>
+      <form id="genForm">
+        <label>想看的话题（逗号分隔）</label>
+        <input type="text" id="topic" name="topic" placeholder="如 AI, 科技" required>
+        <button type="submit" class="btn-primary" id="genBtn" style="width:100%;margin-top:8px">立即生成</button>
+        <span id="genLoading" class="loading">⏳ Agent 正在工作...</span>
+      </form>
+      <div class="hint">结果会渲染在左侧主阅读区</div>
+    </div>
+
+    <!-- 订阅推送 -->
+    <div class="card">
+      <h3>⏰ 订阅推送</h3>
+      <label>订阅关键字</label>
+      <input type="text" id="subTopics" placeholder="如 AI, 科技">
+      <div class="row2">
+        <input type="time" id="subTime" value="09:00">
+        <button class="btn-success" id="saveSubBtn" style="flex-shrink:0">保存订阅</button>
+      </div>
+      <div class="hint">保存后每天到点自动推送到左侧主阅读区</div>
+    </div>
+
+    <!-- 我的订阅 -->
+    <div class="card">
+      <h3>📋 我的订阅（<span id="subUserLabel"></span>）</h3>
+      <div id="subList" class="list-card">
+        {% if subscriptions %}
+          {% for s in subscriptions %}
+          <div class="list-item">
+            <span><b>{{ s.topics }}</b><br><span class="list-meta">每天 {{ s.time }}{% if s.next_push %} · 下次 {{ s.next_push }}{% endif %}</span></span>
+            <span>
+              <button class="push-now-btn" onclick="pushNow('{{ s.topics }}')">▶ 立即推</button>
+              <button class="btn-danger" onclick="delSub('{{ s.topics }}')">🗑</button>
+            </span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="list-empty">还没有订阅</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 历史简报 -->
+    <div class="card">
+      <h3>📚 历史简报（<span id="currentUser"></span>）
+        <button class="btn-secondary" onclick="refreshBriefs()" style="float:right">刷新</button>
+      </h3>
+      <div id="historyList" class="list-card">
+        {% if briefs %}
+          {% for b in briefs %}
+          <div class="list-item clickable" onclick="viewBrief('{{ b.name }}')">
+            <span style="font-family:Consolas,monospace">{{ b.name }}</span>
+            <span class="list-meta">{{ b.mtime }}</span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="list-empty">还没有历史简报</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </aside>
+</div>
+</div>
+
+<script>
+const genForm = document.getElementById('genForm');
+const genBtn = document.getElementById('genBtn');
+const genLoading = document.getElementById('genLoading');
+const modeLabel = document.getElementById('modeLabel');
+const subList = document.getElementById('subList');
+const historyList = document.getElementById('historyList');
+const currentUser = document.getElementById('currentUser');
+const subUserLabel = document.getElementById('subUserLabel');
+const mainBox = document.getElementById('mainBox');
+const mainMeta = document.getElementById('mainMeta');
+
+function myUsername() {
+  return document.getElementById('username').value.trim() || '访客';
+}
+function esc(s) { return String(s).replace(/'/g, "\\'"); }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ---------- 初始化 ----------
+fetch('/health').then(r => r.json()).then(data => {
+  modeLabel.textContent = data.mode === 'online' ? '【在线LLM-API模式】' : '【离线模拟模式】';
+  modeLabel.className = 'badge ' + (data.mode === 'online' ? 'badge-online' : 'badge-offline');
+  document.getElementById('statusLine').textContent =
+    '● 服务运行中 · 定时推送线程正常（每 5 秒检查一次），到点立刻推送';
+}).catch(() => {
+  document.getElementById('statusLine').innerHTML =
+    '<span style="color:#d9534f">● 无法连接服务器，请确认 python app.py 正在运行</span>';
+});
+
+// ---------- 简报 markdown → 新闻排版 ----------
+function renderNews(md) {
+  const out = [];
+  let openItem = false;
+  const closeItem = () => { if (openItem) { out.push('</div>'); openItem = false; } };
+  for (const raw of (md || '').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('# ')) {
+      closeItem();
+      out.push('<h1 class="news-title">' + escHtml(line.slice(2)) + '</h1>');
+    } else if (line.startsWith('## ')) {
+      closeItem();
+      const parts = line.slice(3).split('|').map(s => s.trim());
+      out.push('<div class="news-sec"><div class="news-sec-title">' + escHtml(parts[0]) +
+        (parts[1] ? '<span class="news-date">' + escHtml(parts[1]) + '</span>' : '') + '</div>');
+    } else {
+      const m = line.match(/^(\d+)[.、]\s*(.+)$/);
+      if (m) {
+        closeItem();
+        out.push('<div class="news-item"><div class="news-item-head">' + escHtml(m[1]) + '. ' + escHtml(m[2]) + '</div>');
+        openItem = true;
+      } else if (openItem) {
+        out.push('<p>' + escHtml(line) + '</p>');
+      } else {
+        out.push('<p class="news-standalone">' + escHtml(line) + '</p>');
+      }
+    }
+  }
+  closeItem();
+  return out.join('');
+}
+
+function renderMain(md, meta) {
+  mainMeta.textContent = meta || '';
+  mainBox.innerHTML = renderNews(md);
+}
+
+// ---------- 顶部小提示弹窗 ----------
+let toastTimer = null;
+function showToast(msg) {
+  document.getElementById('toastMsg').textContent = msg;
+  const t = document.getElementById('toast');
+  t.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 8000);  // 8 秒自动消失
+}
+function toastClick() {
+  document.getElementById('toast').style.display = 'none';
+  document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---------- 📥 定时推送接收（每 3 秒轮询最新简报）----------
+let lastSeenBrief = null;   // 页面已见过的最新简报名
+let generating = false;     // 手动生成/推送进行中 → 暂停推送轮询，避免误报为自动推送
+let pollingUser = null;     // 上次轮询的用户名
+
+function showPush(data, u) {
+  renderMain(data.content, '📥 定时推送 · ' + (data.mtime || ''));
+  showToast('收到新推送：' + data.name);
+  refreshBriefs();
+}
+
+async function pollPush() {
+  if (generating) return;  // 手动生成进行中，不检查新推送
+  const u = myUsername();
+  if (u !== pollingUser) {
+    pollingUser = u;
+    lastSeenBrief = null;
+  }
+  try {
+    const resp = await fetch('/briefs/latest?username=' + encodeURIComponent(u));
+    const data = await resp.json();
+    if (!data.has_new) return;
+    if (lastSeenBrief === null) {
+      // 首次建立基线：静默渲染最新简报到主区（不弹提示）
+      lastSeenBrief = data.name;
+      if (data.content) renderMain(data.content, '最新简报 · ' + (data.mtime || ''));
+      // 若是 3 分钟内刚推送的（推送发生在页面打开前），补一个小提示
+      const mt = new Date((data.mtime || '').replace(' ', 'T'));
+      if (!isNaN(mt) && data.content && Date.now() - mt.getTime() < 3 * 60 * 1000) {
+        showToast('收到新推送：' + data.name);
+      }
+      return;
+    }
+    if (data.name !== lastSeenBrief) {
+      lastSeenBrief = data.name;
+      showPush(data, u);  // 到点新推送 → 主区渲染 + 顶部小提示
+    }
+  } catch (e) { /* 静默 */ }
+}
+pollPush();
+setInterval(pollPush, 3000);  // 每 3 秒检查新推送
+
+// ---------- 我的订阅（只看自己的） ----------
+async function loadMySubs() {
+  const u = myUsername();
+  subUserLabel.textContent = u;
+  try {
+    const resp = await fetch('/subscriptions?username=' + encodeURIComponent(u));
+    const data = await resp.json();
+    lastSubsJson = JSON.stringify(data.subscriptions);
+    renderSubs(data.subscriptions);
+  } catch (e) {
+    subList.innerHTML = '<div class="list-empty">订阅加载失败</div>';
+  }
+}
+
+// ---------- 页面自动刷新（订阅 + 历史每 5 秒，内容有变化才重绘） ----------
+let lastSubsJson = null, lastBriefsJson = null;
+
+async function autoRefresh() {
+  const u = myUsername();
+  try {
+    const resp = await fetch('/subscriptions?username=' + encodeURIComponent(u));
+    const d = await resp.json();
+    const j = JSON.stringify(d.subscriptions);
+    if (j !== lastSubsJson) { lastSubsJson = j; renderSubs(d.subscriptions); }
+  } catch (e) { /* 静默 */ }
+  try {
+    const resp = await fetch('/briefs?username=' + encodeURIComponent(u));
+    const d = await resp.json();
+    const j = JSON.stringify(d.briefs);
+    if (j !== lastBriefsJson) { lastBriefsJson = j; renderBriefs(d.briefs); }
+  } catch (e) { /* 静默 */ }
+}
+setInterval(autoRefresh, 5000);  // 每 5 秒自动刷新侧栏两个列表
+
+// ---------- 立即生成 ----------
+genForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = myUsername();
+  currentUser.textContent = u;
+  genBtn.disabled = true;
+  generating = true;
+  genLoading.classList.add('active');
+  try {
+    const fd = new FormData(genForm);
+    fd.append('username', u);
+    const resp = await fetch('/generate', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!data.ok) {
+      alert('❌ ' + (data.error || '未知错误'));
+    } else {
+      renderMain(data.brief_md || data.final_text || '', '🚀 手动生成 · ' + data.archive_name);
+      renderBriefs(data.briefs);
+      lastSeenBrief = data.archive_name;  // 自己生成的算"已见"，不会被误弹推送提示
+      document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  } catch (err) {
+    alert('请求失败: ' + err.message);
+  } finally {
+    genBtn.disabled = false;
+    generating = false;
+    genLoading.classList.remove('active');
+  }
+});
+
+// ---------- 订阅（跟随顶部用户名） ----------
+document.getElementById('saveSubBtn').addEventListener('click', async () => {
+  const username = myUsername();
+  const topics = document.getElementById('subTopics').value.trim();
+  const time = document.getElementById('subTime').value || '09:00';
+  if (!topics) { alert('订阅关键字不能为空'); return; }
+  try {
+    const resp = await fetch('/subscriptions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, topics, time})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // 时间已确定 → 订阅表单初始化，回到默认状态
+      document.getElementById('subTopics').value = '';
+      document.getElementById('subTime').value = '09:00';
+      alert('✅ 订阅已保存！\n\n「' + username + '」每天 ' + time + ' 会自动收到推送\n保持本页面打开即可在左侧看到推送内容');
+      loadMySubs();
+    } else {
+      alert('❌ ' + (data.error || '保存失败'));
+    }
+  } catch (e) { alert('请求失败: ' + e.message); }
+});
+
+async function delSub(topics) {
+  const u = myUsername();
+  if (!confirm('删除这条订阅？\n' + u + ' · ' + topics)) return;
+  const resp = await fetch('/subscriptions?username=' + encodeURIComponent(u) + '&topics=' + encodeURIComponent(topics), {method: 'DELETE'});
+  const data = await resp.json();
+  if (data.ok) loadMySubs();
+}
+
+async function pushNow(topics) {
+  const u = myUsername();
+  generating = true;
+  try {
+    const resp = await fetch('/subscriptions/push-now', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: u, topics})
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('❌ ' + (data.error || '失败')); return; }
+    renderMain(data.brief_md || data.final_text || '', '▶ 立即推送 · ' + data.archive_name);
+    renderBriefs(data.briefs);
+    lastSeenBrief = data.archive_name;  // 手动推一次也算"已见"
+    document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { alert('请求失败: ' + e.message); }
+  finally { generating = false; }
+}
+
+// ---------- 渲染函数 ----------
+function renderSubs(subs) {
+  if (!subs || subs.length === 0) {
+    subList.innerHTML = '<div class="list-empty">还没有订阅，在上面加一条</div>'; return;
+  }
+  subList.innerHTML = subs.map(s =>
+    '<div class="list-item">' +
+    '<span><b>' + escHtml(s.topics) + '</b><br><span class="list-meta">每天 ' + s.time +
+      (s.next_push ? ' · 下次 ' + s.next_push : '') + '</span></span>' +
+    '<span>' +
+      '<button class="push-now-btn" onclick="pushNow(\'' + esc(s.topics) + '\')">▶ 立即推</button>' +
+      '<button class="btn-danger" onclick="delSub(\'' + esc(s.topics) + '\')">🗑</button>' +
+    '</span></div>'
+  ).join('');
+}
+
+function renderBriefs(briefs) {
+  if (!briefs) return;
+  if (briefs.length === 0) {
+    historyList.innerHTML = '<div class="list-empty">还没有历史简报</div>'; return;
+  }
+  historyList.innerHTML = briefs.map(b =>
+    '<div class="list-item clickable" onclick="viewBrief(\'' + esc(b.name) + '\')">' +
+    '<span style="font-family:Consolas,monospace">' + b.name + '</span>' +
+    '<span class="list-meta">' + b.mtime + '</span></div>'
+  ).join('');
+}
+
+async function refreshBriefs() {
+  try {
+    const resp = await fetch('/briefs?username=' + encodeURIComponent(myUsername()));
+    const data = await resp.json();
+    lastBriefsJson = JSON.stringify(data.briefs);
+    renderBriefs(data.briefs);
+  } catch (e) { /* 静默 */ }
+}
+
+async function viewBrief(name) {
+  try {
+    const resp = await fetch('/briefs/' + encodeURIComponent(name) + '?username=' + encodeURIComponent(myUsername()));
+    const data = await resp.json();
+    renderMain(data.content, '📚 历史简报 · ' + data.name);
+    document.getElementById('mainCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    alert('读取失败: ' + e.message);
+  }
+}
+
+// ---------- 用户名切换：清空主区 + 同步订阅 / 历史 / 推送基线 ----------
+let nameDebounce = null;
+document.getElementById('username').addEventListener('input', () => {
+  clearTimeout(nameDebounce);
+  nameDebounce = setTimeout(() => {
+    const u = myUsername();
+    if (u === pollingUser) return;  // 用户名没变就不动页面
+    // 重置推送基线 + 清空主阅读区（不能残留上一个用户的简报）
+    pollingUser = null;
+    lastSeenBrief = null;
+    mainMeta.textContent = '';
+    mainBox.innerHTML = '<div class="news-empty">还没有内容<br>在右侧「立即生成」一份，或等待订阅到点自动推送</div>';
+    currentUser.textContent = u;  // 历史简报标题
+    loadMySubs();                 // 我的订阅
+    refreshBriefs();              // 我的历史简报
+  }, 400);  // 停止输入 0.4 秒后同步
+});
+
+// 页面加载：初始化
+currentUser.textContent = myUsername();
+loadMySubs();
+</script>
+
+</body>
+</html>
