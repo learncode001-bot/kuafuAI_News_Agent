@@ -1,150 +1,120 @@
-# 每日 AI 新闻助手（ReAct Agent）
+# 每日 AI 新闻助手 Agent
 
-基于 **Python + LangChain** 的 ReAct 模式新闻简报 Agent：用户按偏好订阅话题，Agent 每天定时自动整理简报并推送到页面。**工具调用顺序完全由 LLM 决定**——调哪个工具、调用几次、什么时候停，代码不写死任何线性流程。
+我的课程作业（也是面试作品），用 Python + LangChain 写的 ReAct 模式 Agent。
+在页面上填个用户名、订几个感兴趣的话题、设个时间，它每天到点自动整理一份新闻简报推到页面上，不用手动刷新。
 
-支持 **在线 LLM-API**（DeepSeek 等 OpenAI 兼容接口）与 **离线模拟**（无需联网/密钥）双模式。
+新闻来源是本地 `news_data/` 目录下的 txt 文件。题目说新闻从哪来自己定，我没做爬虫，直接用本地文件——好处是稳定、可复现，也不会爬到一半被反爬。
 
----
+## 跑起来（亲测 5 分钟左右）
 
-## 快速开始（5 分钟跑起来）
-
-> 环境要求：Python 3.10+，Windows / macOS / Linux 均可
-
-**1. 克隆并进入项目**
+需要 Python 3.10+。
 
 ```bash
 git clone https://github.com/learncode001-bot/kuafuAI_News_Agent.git
 cd kuafuAI_News_Agent
-```
-
-**2. 一键安装依赖**
-
-```bash
 pip install -r requirements.txt
 ```
 
-**3. 创建本机配置文件**
+pip 太慢就换清华源：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+
+然后复制一份配置文件：
 
 ```bash
-# Windows (cmd)
-copy config.template.py config.py
-# macOS / Linux
-cp config.template.py config.py
+copy config.template.py config.py    # Windows
+cp config.template.py config.py      # macOS / Linux
 ```
 
-**4. 二选一：有 Key 走在线，没 Key 走离线**
+接下来分两种情况：
 
-- **没有 API Key（最快体验）**：打开 `config.py`，把 `USE_LLM_API = True` 改成 `False` 即可，跳到第 5 步。
-- **有 API Key（在线模式）**：把密钥设为环境变量（密钥不走配置文件，防止泄露）：
+**情况一：手头没有大模型 API Key** —— 打开 `config.py`，把 `USE_LLM_API = True` 改成 `False`，走离线模式，不用联网也能跑完整流程。
+
+**情况二：有 Key** —— Key 不设进文件，设成环境变量（防泄露）：
 
 ```bash
-# Windows（永久生效，设完重开终端）
-setx NEWS_AGENT_API_KEY "sk-你的key"
-# Windows cmd（仅当前窗口临时）
-set NEWS_AGENT_API_KEY=sk-你的key
-# macOS / Linux
-export NEWS_AGENT_API_KEY=sk-你的key
+setx NEWS_AGENT_API_KEY "sk-你的key"   # Windows，设完要【关掉重开终端】才生效
+export NEWS_AGENT_API_KEY=sk-你的key   # macOS / Linux
 ```
 
-默认对接 DeepSeek（`https://api.deepseek.com/v1` + `deepseek-chat`）。用其它平台时，在 `config.py` 里改 `API_URL` / `MODEL` 即可，对照表见下文。
+默认接的是 DeepSeek。想用别的平台（智谱、Kimi、通义、OpenAI 都行），改 `config.py` 里的 `API_URL` 和 `MODEL` 两个值就可以。
 
-**5. 启动服务**
+最后启动：
 
 ```bash
 python app.py
 ```
 
-浏览器打开 `http://localhost:5000`，看到页面顶部徽标显示【在线LLM-API模式】或【离线模拟模式】即成功。
+浏览器打开 `http://localhost:5000`，页面顶部会显示当前是【在线LLM-API模式】还是【离线模拟模式】。
 
-**6. 体验完整流程**
+试用流程：右边输入用户名 → 订阅里填话题（比如 `AI, 时政`）和一个 2 分钟后的时间 → 页面别关，到点左边会自动弹出简报。等不及就点「立即生成」或订阅条目上的「▶ 立即推」。
 
-1. 页面右侧输入你的**用户名**（这就是身份，订阅/推送/历史都跟它走）
-2. 「订阅推送」里填关键字（如 `AI`）+ 推送时间（建议填 2 分钟后），点保存
-3. 保持页面开着，到点后左侧主阅读区**自动弹出**新简报，无需任何操作
-4. 等不及也可以点「立即生成」或订阅条目的「▶ 立即推」手动触发
+## 在线和离线两种模式
 
----
+**在线模式**是主角：标准的 ReAct 循环——把任务和 5 个工具的描述发给大模型，模型自己决定调哪个工具、调几次、什么时候停，我只负责在本地执行工具并把结果回传，最多 15 轮防止死循环。调哪个工具的顺序没有一行代码写死。
 
-## 两种运行模式
+这里有个实现上的取舍：我没用 openai 官方 SDK，而是用 requests 直接请求 OpenAI 兼容接口。原因是我电脑环境里的依赖被别的包污染过，SDK 一直报错，requests 直连反而最稳，还少一层依赖。
 
-| | 离线模拟模式 | 在线 LLM-API 模式 |
-|---|---|---|
-| 开关 | `config.py` 里 `USE_LLM_API = False` | `USE_LLM_API = True` + 环境变量密钥 |
-| 依赖 | 无需联网、无需 Key | 任意 OpenAI 兼容 API Key |
-| 原理 | `FakeListLLM` 按用户话题动态规划 ReAct 轨迹，从本地文件真实取材 | 标准 ReAct Agent-Loop：任务+5 个工具描述发给大模型，模型自主决策调用，本地执行工具后结果回传，多轮循环直到模型自己判断停止 |
+**离线模式**是备胎：演示、答辩现场没网或者没 Key 的时候用。我自己写了个 FakeListLLM，根据用户话题匹配本地素材文件、动态拼出 ReAct 轨迹，内容同样是从本地 txt 真实读出来的，不是写死的文案。
 
-两种模式共用同一套 5 个工具，业务逻辑完全一致。
+调 API 可能遇到的异常都做了兜底：Key 不对（401）、网络超时、对方服务繁忙（503）等，页面会显示具体原因而不是程序崩溃。503 这种临时故障会自动重试 3 次；定时推送如果失败了，5 分钟后还会自动补推一次。
 
-### 各平台 API 配置对照（在线模式）
+## 密钥怎么处理的
 
-| 平台 | API_URL | MODEL 示例 |
-|---|---|---|
-| DeepSeek（默认） | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` |
-| Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
-| 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-
-> 异常兜底：网络错误、Key 无效（401）、模型名错误、返回格式异常都会被捕获并在页面友好提示，程序不会崩溃。
-
-### 密钥安全
-
-- 密钥**只走环境变量** `NEWS_AGENT_API_KEY`，任何文件都不保存明文密钥
-- `config.py` 是本机私有文件，已加入 `.gitignore`，**请勿提交，也不要删除 .gitignore 中该条目**
-- 仓库中的 `config.template.py` 是模板，复制改名即为 `config.py`
-
----
+- Key 只走环境变量 `NEWS_AGENT_API_KEY`，任何文件里都不存明文
+- `config.py` 在 `.gitignore` 里，不会提交进仓库（仓库里的是模板 `config.template.py`）
+- 我自查过整个 git 历史，确认 Key 从来没被提交过
 
 ## 项目结构
 
 ```
-├── app.py               # Flask 入口：页面路由、订阅管理、后台定时推送线程
-├── agent.py             # ReAct Agent：在线 Agent-Loop（主）+ LangGraph（兜底）+ 离线手动 ReAct
-├── tools.py             # 5 个工具：list_dir / read_file / search_content / write_file / bash
-├── config.template.py   # 配置模板（入库）；复制为 config.py 后使用（config.py 不入库）
-├── runner.py            # 终端单次运行入口
-├── requirements.txt     # 依赖清单，一键起环境
-├── news_data/           # 新闻素材库（本地 txt，不做联网爬虫）
-├── templates/index.html # 前端页面（左侧新闻阅读区 + 右侧功能面板）
-└── briefs/<用户名>/     # 运行时生成：每个用户的简报归档（不入库）
+app.py               Flask 入口：页面路由、订阅管理、后台定时推送线程
+agent.py             ReAct Agent：在线循环 + 离线模拟，核心都在这
+tools.py             5 个工具
+config.template.py   配置模板，复制成 config.py 用
+runner.py            命令行单次运行入口
+news_data/           本地新闻素材（AI/科技/创投/时政/考公 5 个 txt）
+templates/index.html 前端页面
+briefs/<用户名>/      运行后生成，各用户的简报归档
 ```
 
-## 数据存储说明（无数据库）
+## 关于数据库：没有用
 
-本项目**不使用数据库**，无需建表 SQL / migration 脚本。全部数据以文件形式存储：
+全部数据都是文件，所以仓库里没有建表 SQL（也不需要）：
 
-| 数据 | 位置 | 说明 |
-|---|---|---|
-| 新闻素材 | `news_data/*.txt` | 入库，Agent 的唯一新闻来源 |
-| 用户订阅 | `subscriptions.json` | 运行时生成，用户名/话题/每日推送时间 |
-| 简报归档 | `briefs/<用户名>/*.md` | 运行时生成，按用户隔离 |
-| 推送日志 | `scheduler.log` | 运行时生成 |
+- 订阅存在 `subscriptions.json`
+- 每个用户的简报存在 `briefs/<用户名>/` 下，按用户名隔离
+- 推送记录写在 `scheduler.log`
 
-## 工具集（5 个，签名与题目一致）
+## 5 个工具
 
-| 工具 | 签名 | 说明 |
-|---|---|---|
-| list_dir | `list_dir(path)` | 列出目录内容 |
-| read_file | `read_file(path)` | 读取文件（UTF-8，失败降级 GBK） |
-| search_content | `search_content(keyword, dir)` | 目录下按关键词搜索文件内容 |
-| write_file | `write_file(path, content)` | 写入文件（自动创建父目录） |
-| bash | `bash(command)` | 执行 shell 命令（内置危险命令黑名单） |
+题目要求的 5 个，在 `tools.py` 里：
 
-## 核心设计：工具调用顺序由 LLM 决定
+- `list_dir(path)` 列目录
+- `read_file(path)` 读文件
+- `search_content(keyword, dir)` 按关键词搜文件内容
+- `write_file(path, content)` 写文件
+- `bash(command)` 执行 shell 命令（加了危险命令黑名单，rm -rf 这类直接拒绝）
 
-在线模式是标准 **function-calling ReAct 循环**（[agent.py](agent.py) `_build_online_react_runner`）：
+## 怎么保证「工具顺序是 LLM 决定的」
 
-1. 把用户任务 + 5 个工具的 JSON Schema 发给大模型
-2. 模型自主返回 `tool_calls`（调哪个、参数是什么）
-3. 本地执行工具，结果以 `role=tool` 消息回传
-4. 多轮循环，模型自己判断素材足够后停止调用、输出简报
-5. 最多 15 轮防死循环；全流程终端打印每轮决策，可观测
+除了 ReAct 循环本身，我在 system prompt 里给模型交代了两样东西：
 
-此外通过 system_prompt 向模型声明**素材地图**（哪个文件属于哪个话题）与**硬性规则**（只允许用工具读本地文件、禁止用内置知识编造新闻、检索为空时如实输出「未发现相关内容」），保证简报真实可追溯。
+1. **素材地图**：告诉它 news_data 下每个文件对应什么话题（ai_news 是 AI、politics_news 是时政……），免得它把「时政」读到「考公」里去
+2. **几条硬规矩**：新闻只能用工具读本地文件、不许用自己脑子里的知识编、搜不到就老实输出「未发现相关内容」、结束前必须把简报写进文件
 
-## 终端单次运行（可选）
+可以试试订一个素材库里没有的话题（比如「足球」），它会老老实实告诉你没找到，不会编新闻——这是我特意留的演示点。
+
+## 开发过程中踩过的坑（真实记录）
+
+这部分留下来给以后的自己，面试被问「遇到过什么难点」也基本在这：
+
+- **LangChain 版本兼容**：不同版本 API 变动大，FakeListLLM 的 `.predict()` 在新版被删了，最后改用 `.invoke()`，离线的 ReAct 循环也是手写的，绕开了解析器差异
+- **重复推送**：Flask 开了 debug 模式后，重载机制会起父子两个进程，调度线程被启动了两份，同一订阅到点推两遍。最后用 `WERKZEUG_RUN_MAIN` 判断，只在真正跑服务的子进程里启动线程
+- **简报串内容**：`daily_brief.md` 是共享产物文件，上一次运行残留的内容被归档给了下一个订阅（订「生物」收到「历史」简报，人都懵了）。现在每次运行前先删旧文件，再加锁防并发
+- **DeepSeek 高峰期 503**：到点推送正好撞上对方服务过载，当天简报就丢了。后来加了两层保险：API 调用自动退避重试，调度器失败 5 分钟后自动补推
+
+## 命令行玩法（可选）
 
 ```bash
-python runner.py "AI, 科技"      # 按 config.py 自动选择模式
-python runner.py "AI" --offline  # 强制离线模拟
+python runner.py "AI, 科技"      # 按 config.py 的配置自动选模式
+python runner.py "AI" --offline  # 强制离线
 ```
