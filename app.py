@@ -8,6 +8,7 @@ app.py —— Flask Web 入口
 """
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -78,7 +79,8 @@ def _archive_brief(username: str, topic: str, brief_text: str) -> str:
     """归档一份简报，返回文件名。"""
     ud = _user_dir(username, create=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M")
-    safe_topic = topic.replace(",", "_").replace(" ", "_")[:20] or "brief"
+    # 话题可能含 Windows 文件名非法字符（如 C++、AI? ），统一替换掉
+    safe_topic = re.sub(r'[<>:"/\\|?*]', "_", topic).replace(",", "_").replace(" ", "_")[:20] or "brief"
     name = f"{ts}_{safe_topic}.md"
     (ud / name).write_text(brief_text or f"# {topic}\n\n（空简报）", encoding="utf-8")
     return name
@@ -111,21 +113,39 @@ def _save_subs(subs):
     SUBS_FILE.write_text(json.dumps(subs, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _run_and_archive(username: str, topic: str):
-    """跑 Agent + 归档，返回 (final_text, brief_text, archive_name)。"""
-    agent_pair, mode = _init_agent()
-    final_text = run(agent_pair, topic=topic)
+# 同一时刻只允许一个 Agent 运行（保护共享产物文件 daily_brief.md，
+# 防止手动生成与定时推送并发时互相覆盖/读到对方的半成品）
+RUN_LOCK = threading.Lock()
 
-    # 读 Agent 直接产物
+
+def _run_and_archive(username: str, topic: str):
+    """跑 Agent + 归档，返回 (final_text, brief_text, archive_name, mode)。
+
+    daily_brief.md 是 Agent 的共享产物文件：运行前先删除，保证归档内容
+    一定来自本次运行；若本次模型未写文件（如检索为空时跳过了 write_file），
+    用模型最终回复兜底，绝不把上一次运行的残留内容归档给本次订阅。
+    """
+    agent_pair, mode = _init_agent()
     brief_path = BASE_DIR / "daily_brief.md"
-    brief_text = ""
-    if brief_path.exists():
+    with RUN_LOCK:
         try:
-            brief_text = brief_path.read_text(encoding="utf-8")
+            brief_path.unlink(missing_ok=True)  # 清掉上一轮残留
         except Exception:
             pass
 
-    archive_name = _archive_brief(username, topic, brief_text)
+        final_text = run(agent_pair, topic=topic)
+
+        brief_text = ""
+        if brief_path.exists():
+            try:
+                brief_text = brief_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        if not brief_text.strip():
+            # 模型本次未写文件（例如素材为空时只回了话没调 write_file）
+            brief_text = final_text or f"# 每日新闻简报（{topic}）\n\n未发现相关内容。"
+
+        archive_name = _archive_brief(username, topic, brief_text)
     return final_text, brief_text, archive_name, mode
 
 
